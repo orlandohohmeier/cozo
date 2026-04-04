@@ -42,7 +42,7 @@ storage-tikv = ["cozo/storage-tikv"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cozo = { version = "0.7.6", path = "../cozo-core", default-features = false }
+cozo = { version = "0.7.6", path = "../cozo-core", default-features = false, features = ["rayon"] }
 clap = { version = "4.5.4", features = ["derive"] }
 env_logger = "0.11.3"
 log = "0.4.21"
@@ -63,6 +63,5 @@ tokio = { version = "1.37.0", features = ["full"] }
 async-stream = "0.3.5"
 futures = "0.3.30"
 crossbeam = "0.8.4"
-eventsource-client = "0.12.2"
 tower-http = { version = "0.5.2", features = ["full"] }
 rayon = "1.10.0"
