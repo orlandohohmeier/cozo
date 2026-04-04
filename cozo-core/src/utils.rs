@@ -16,16 +16,15 @@ pub(crate) fn swap_option_result<T, E>(d: Result<Option<T>, E>) -> Option<Result
 }
 
 #[derive(Default)]
-pub(crate) struct TempCollector<T: serde::Serialize + for<'a> serde::Deserialize<'a>> {
-    // pub(crate) inner: Vec<T>,
-    pub(crate) inner: swapvec::SwapVec<T>,
+pub(crate) struct TempCollector<T> {
+    pub(crate) inner: Vec<T>,
 }
 
-impl<T: serde::Serialize + for<'a> serde::Deserialize<'a>> TempCollector<T> {
+impl<T> TempCollector<T> {
     pub(crate) fn push(&mut self, val: T) {
-        self.inner.push(val).unwrap();
+        self.inner.push(val);
     }
     pub(crate) fn into_iter(self) -> impl Iterator<Item = T> {
-        self.inner.into_iter().map(|v| v.unwrap())
+        self.inner.into_iter()
     }
 }
