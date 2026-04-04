@@ -16,11 +16,16 @@ use serde_json::json;
 
 use cozo::*;
 
-fn py_to_rows(ob: &PyAny) -> PyResult<Vec<Vec<DataValue>>> {
-    let rows = ob.extract::<Vec<Vec<&PyAny>>>()?;
+fn py_to_rows(ob: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<DataValue>>> {
+    let py = ob.py();
+    let rows = ob.extract::<Vec<Vec<Py<PyAny>>>>()?;
     let res: Vec<Vec<DataValue>> = rows
         .into_iter()
-        .map(|row| row.into_iter().map(py_to_value).collect::<PyResult<_>>())
+        .map(|row| {
+            row.into_iter()
+                .map(|value| py_to_value(value.bind(py)))
+                .collect::<PyResult<_>>()
+        })
         .collect::<PyResult<_>>()?;
     Ok(res)
 }
@@ -29,12 +34,12 @@ fn report2py(r: Report) -> PyErr {
     PyException::new_err(r.to_string())
 }
 
-fn py_to_named_rows(ob: &PyAny) -> PyResult<NamedRows> {
+fn py_to_named_rows(ob: &Bound<'_, PyAny>) -> PyResult<NamedRows> {
     let d = ob.downcast::<PyDict>()?;
     let rows = d
         .get_item("rows")?
         .ok_or_else(|| PyException::new_err("named rows must contain 'rows'"))?;
-    let rows = py_to_rows(rows)?;
+    let rows = py_to_rows(&rows)?;
     let headers = d
         .get_item("headers")?
         .ok_or_else(|| PyException::new_err("named rows must contain 'headers'"))?;
@@ -42,7 +47,7 @@ fn py_to_named_rows(ob: &PyAny) -> PyResult<NamedRows> {
     Ok(NamedRows::new(headers, rows))
 }
 
-fn py_to_value(ob: &PyAny) -> PyResult<DataValue> {
+fn py_to_value(ob: &Bound<'_, PyAny>) -> PyResult<DataValue> {
     Ok(if ob.is_none() {
         DataValue::Null
     } else if let Ok(b) = ob.downcast::<PyBool>() {
@@ -60,26 +65,26 @@ fn py_to_value(ob: &PyAny) -> PyResult<DataValue> {
     } else if let Ok(l) = ob.downcast::<PyTuple>() {
         let mut coll = Vec::with_capacity(l.len());
         for el in l {
-            let el = py_to_value(el)?;
+            let el = py_to_value(&el)?;
             coll.push(el)
         }
         DataValue::List(coll)
     } else if let Ok(l) = ob.downcast::<PyList>() {
         let mut coll = Vec::with_capacity(l.len());
         for el in l {
-            let el = py_to_value(el)?;
+            let el = py_to_value(&el)?;
             coll.push(el)
         }
         DataValue::List(coll)
     } else if let Ok(d) = ob.downcast::<PyDict>() {
         let mut coll = serde_json::Map::default();
         for (k, v) in d {
-            let k = serde_json::Value::from(py_to_value(k)?);
+            let k = serde_json::Value::from(py_to_value(&k)?);
             let k = match k {
                 serde_json::Value::String(s) => s,
                 s => s.to_string(),
             };
-            let v = serde_json::Value::from(py_to_value(v)?);
+            let v = serde_json::Value::from(py_to_value(&v)?);
             coll.insert(k, v);
         }
         DataValue::Json(JsonData(json!(coll)))
@@ -90,11 +95,11 @@ fn py_to_value(ob: &PyAny) -> PyResult<DataValue> {
     })
 }
 
-fn convert_params(ob: &PyDict) -> PyResult<BTreeMap<String, DataValue>> {
+fn convert_params(ob: &Bound<'_, PyDict>) -> PyResult<BTreeMap<String, DataValue>> {
     let mut ret = BTreeMap::new();
     for (k, v) in ob {
         let k: String = k.extract()?;
-        let v = py_to_value(v)?;
+        let v = py_to_value(&v)?;
         ret.insert(k, v);
     }
     Ok(ret)
@@ -223,7 +228,7 @@ impl CozoDbPy {
         &self,
         py: Python<'_>,
         query: &str,
-        params: &PyDict,
+        params: &Bound<'_, PyDict>,
         immutable: bool,
     ) -> PyResult<PyObject> {
         if let Some(db) = &self.db {
@@ -244,8 +249,7 @@ impl CozoDbPy {
                     let reports = format_error_as_json(err, Some(query)).to_string();
                     let json_mod = py.import("json")?;
                     let loads_fn = json_mod.getattr("loads")?;
-                    let args = PyTuple::new(py, [PyString::new(py, &reports)]);
-                    let msg = loads_fn.call1(args)?;
+                    let msg = loads_fn.call1((PyString::new(py, &reports),))?;
                     Err(PyException::new_err(PyObject::from(msg)))
                 }
             }
@@ -253,19 +257,18 @@ impl CozoDbPy {
             Err(PyException::new_err(DB_CLOSED_MSG))
         }
     }
-    pub fn register_callback(&self, rel: &str, callback: &PyAny) -> PyResult<u32> {
+    pub fn register_callback(&self, rel: &str, callback: &Bound<'_, PyAny>) -> PyResult<u32> {
         if let Some(db) = &self.db {
-            let cb: Py<PyAny> = callback.into();
+            let cb = callback.clone().unbind();
             let (id, ch) = db.register_callback(rel, None);
             rayon::spawn(move || {
                 for (op, new, old) in ch {
                     Python::with_gil(|py| {
-                        let op = PyString::new(py, op.as_str()).into();
+                        let op = PyString::new(py, op.as_str());
                         let new_py = rows_to_py_rows(new.rows, py);
                         let old_py = rows_to_py_rows(old.rows, py);
-                        let args = PyTuple::new(py, [op, new_py, old_py]);
-                        let callable = cb.as_ref(py);
-                        if let Err(err) = callable.call1(args) {
+                        let callable = cb.bind(py);
+                        if let Err(err) = callable.call1((op, new_py, old_py)) {
                             eprintln!("{}", err);
                         }
                     })
@@ -280,20 +283,20 @@ impl CozoDbPy {
         &self,
         name: String,
         arity: usize,
-        callback: &PyAny,
+        callback: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         if let Some(db) = &self.db {
-            let cb: Py<PyAny> = callback.into();
+            let cb = callback.clone().unbind();
             let rule_impl = SimpleFixedRule::new(arity, move |inputs, options| -> Result<_> {
                 Python::with_gil(|py| -> Result<NamedRows> {
                     let py_inputs = PyList::new(
                         py,
                         inputs.into_iter().map(|nr| rows_to_py_rows(nr.rows, py)),
-                    );
+                    )
+                    .into_diagnostic()?;
                     let py_opts = options_to_py(options, py).into_diagnostic()?;
-                    let args = PyTuple::new(py, vec![PyObject::from(py_inputs), py_opts]);
-                    let res = cb.as_ref(py).call1(args).into_diagnostic()?;
-                    Ok(NamedRows::new(vec![], py_to_rows(res).into_diagnostic()?))
+                    let res = cb.bind(py).call1((py_inputs, py_opts)).into_diagnostic()?;
+                    Ok(NamedRows::new(vec![], py_to_rows(&res).into_diagnostic()?))
                 })
             });
             db.register_fixed_rule(name, rule_impl).map_err(report2py)
@@ -333,12 +336,12 @@ impl CozoDbPy {
             Err(PyException::new_err(DB_CLOSED_MSG.to_string()))
         }
     }
-    pub fn import_relations(&self, py: Python<'_>, data: &PyDict) -> PyResult<()> {
+    pub fn import_relations(&self, py: Python<'_>, data: &Bound<'_, PyDict>) -> PyResult<()> {
         if let Some(db) = &self.db {
             let mut arg = BTreeMap::new();
-            for (k, v) in data.iter() {
+            for (k, v) in data {
                 let k = k.extract::<String>()?;
-                let vals = py_to_named_rows(v)?;
+                let vals = py_to_named_rows(&v)?;
                 arg.insert(k, vals);
             }
             py.allow_threads(|| db.import_relations(arg))
@@ -401,7 +404,12 @@ impl CozoDbMulTx {
             .commit()
             .map_err(|err| PyException::new_err(err.to_string()))
     }
-    pub fn run_script(&self, py: Python<'_>, query: &str, params: &PyDict) -> PyResult<PyObject> {
+    pub fn run_script(
+        &self,
+        py: Python<'_>,
+        query: &str,
+        params: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
         let params = convert_params(params)?;
         match py.allow_threads(|| self.tx.run_script(query, params)) {
             Ok(rows) => Ok(named_rows_to_py(rows, py)),
@@ -409,8 +417,7 @@ impl CozoDbMulTx {
                 let reports = format_error_as_json(err, Some(query)).to_string();
                 let json_mod = py.import("json")?;
                 let loads_fn = json_mod.getattr("loads")?;
-                let args = PyTuple::new(py, [PyString::new(py, &reports)]);
-                let msg = loads_fn.call1(args)?;
+                let msg = loads_fn.call1((PyString::new(py, &reports),))?;
                 Err(PyException::new_err(PyObject::from(msg)))
             }
         }
@@ -421,8 +428,8 @@ impl CozoDbMulTx {
 fn eval_expressions(
     py: Python<'_>,
     query: &str,
-    params: &PyDict,
-    bindings: &PyDict,
+    params: &Bound<'_, PyDict>,
+    bindings: &Bound<'_, PyDict>,
 ) -> PyResult<PyObject> {
     let params = convert_params(params).unwrap();
     let bindings = convert_params(bindings).unwrap();
@@ -432,15 +439,14 @@ fn eval_expressions(
             let reports = format_error_as_json(err, Some(query)).to_string();
             let json_mod = py.import("json")?;
             let loads_fn = json_mod.getattr("loads")?;
-            let args = PyTuple::new(py, [PyString::new(py, &reports)]);
-            let msg = loads_fn.call1(args)?;
+            let msg = loads_fn.call1((PyString::new(py, &reports),))?;
             Err(PyException::new_err(PyObject::from(msg)))
         }
     }
 }
 
 #[pyfunction]
-fn variables(py: Python<'_>, query: &str, params: &PyDict) -> PyResult<BTreeSet<String>> {
+fn variables(py: Python<'_>, query: &str, params: &Bound<'_, PyDict>) -> PyResult<BTreeSet<String>> {
     let params = convert_params(params).unwrap();
     match get_variables(query, &params) {
         Ok(rows) => Ok(rows),
@@ -448,15 +454,14 @@ fn variables(py: Python<'_>, query: &str, params: &PyDict) -> PyResult<BTreeSet<
             let reports = format_error_as_json(err, Some(query)).to_string();
             let json_mod = py.import("json")?;
             let loads_fn = json_mod.getattr("loads")?;
-            let args = PyTuple::new(py, [PyString::new(py, &reports)]);
-            let msg = loads_fn.call1(args)?;
+            let msg = loads_fn.call1((PyString::new(py, &reports),))?;
             Err(PyException::new_err(PyObject::from(msg)))
         }
     }
 }
 
 #[pymodule]
-fn cozo_embedded(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn cozo_embedded(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<CozoDbPy>()?;
     m.add_class::<CozoDbMulTx>()?;
     m.add_function(wrap_pyfunction!(eval_expressions, m)?)?;
