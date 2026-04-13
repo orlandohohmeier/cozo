@@ -211,8 +211,8 @@ pub(crate) async fn server_main(args: ServerArgs) {
         match tokio::fs::read_to_string(&conf_path).await {
             Ok(s) => s.trim().to_string(),
             Err(_) => {
-                let s = rand::thread_rng()
-                    .sample_iter(&rand::distributions::Alphanumeric)
+                let s = rand::rng()
+                    .sample_iter(&rand::distr::Alphanumeric)
                     .take(64)
                     .map(char::from)
                     .collect();

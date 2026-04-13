@@ -18,7 +18,7 @@ use crate::{DataValue, Expr, SourceSpan, Symbol};
 use itertools::Itertools;
 use miette::{bail, miette, Result};
 use quadrature::integrate;
-use rand::{thread_rng, RngCore};
+use rand::RngCore;
 use rustc_hash::FxHashSet;
 use smartstring::{LazyCompact, SmartString};
 use std::cmp::min;
@@ -290,7 +290,7 @@ impl LshParams {
 
 impl HashPermutations {
     pub(crate) fn new(n_perms: usize) -> Self {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let mut perms = Vec::with_capacity(n_perms);
         for _ in 0..n_perms {
             perms.push(rng.next_u32());

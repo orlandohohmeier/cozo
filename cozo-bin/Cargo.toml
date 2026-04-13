@@ -46,7 +46,7 @@ cozo = { version = "0.7.6", path = "../cozo-core", default-features = false, fea
 clap = { version = "4.5.4", features = ["derive"] }
 env_logger = "0.11.3"
 log = "0.4.21"
-rand = "0.8.5"
+rand = "0.9.3"
 serde_derive = "1.0.199"
 serde = { version = "1.0.199" }
 chrono = "0.4.38"

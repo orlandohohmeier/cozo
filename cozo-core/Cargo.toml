@@ -86,7 +86,7 @@ storage-tikv = ["dep:tikv-client", "dep:tokio"]
 [dependencies]
 casey = "0.4.0"
 either = "1.11.0"
-rand = "0.8.5"
+rand = "0.9.3"
 miette = { version = "5.10.0", features = ["fancy"] }
 lazy_static = "1.4.0"
 log = "0.4.21"
@@ -102,7 +102,7 @@ rmp-serde = "1.2.0"
 rmpv = "1.0.2"
 base64 = "0.22.0"
 chrono = "0.4.38"
-chrono-tz = "0.9.0"
+chrono-tz = "0.10.4"
 priority-queue = "1.4.0"
 ordered-float = "4.2.0"
 byteorder = "1.5.0"
@@ -133,7 +133,7 @@ crossbeam = "0.8.4"
 ndarray = { version = "0.15.6", features = ["serde"] }
 sha2 = "0.10.8"
 rustc-hash = "1.1.0"
-twox-hash = "1.6.3"
+twox-hash = "2.1.2"
 quadrature = "0.1.2"
 # For the FTS feature
 jieba-rs = "0.8.1"
